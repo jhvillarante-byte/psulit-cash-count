@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: psulit-cash-count
+    env: node
+    buildCommand: npm install
+    startCommand: node server.js
+    plan: free
