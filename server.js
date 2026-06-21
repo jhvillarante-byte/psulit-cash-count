@@ -12,7 +12,13 @@ const CHAT_ID = "-4680237259";
 const TAPO_EMAIL = process.env.TAPO_EMAIL;
 const TAPO_PASSWORD = process.env.TAPO_PASSWORD;
 
-// Camera to use per branch for cash count snapshot
+const SLACK_TOKEN = process.env.SLACK_TOKEN;
+const SLACK_CHANNELS = {
+  Solaire: "C0B734364T0",
+  Alphaland: "C06NDDD1D0U",
+  Intrepid: "C06NARV9T1R",
+};
+
 const BRANCH_CAMERAS = {
   Solaire: "SolaireCam01",
   Alphaland: "Alphaland_psulit_vault",
@@ -39,6 +45,7 @@ async function getTapoToken() {
     }),
   });
   const data = await res.json();
+  console.log("Login result:", JSON.stringify(data).slice(0, 200));
   return data?.result?.token || null;
 }
 
@@ -52,63 +59,101 @@ async function getTapoDevices(token) {
   return data?.result?.deviceList || [];
 }
 
-async function getTapoSnapshot(device, token) {
+async function sendToSlack(branch, message) {
   try {
-    const regionUrl = `${device.appServerUrl}?token=${token}`;
-
-    // Request snapshot URL via passthrough
-    const res = await fetch(regionUrl, {
+    const channelId = SLACK_CHANNELS[branch];
+    if (!channelId || !SLACK_TOKEN) return false;
+    const res = await fetch("https://slack.com/api/chat.postMessage", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${SLACK_TOKEN}`
+      },
       body: JSON.stringify({
-        method: "passthrough",
-        params: {
-          deviceId: device.deviceId,
-          requestData: JSON.stringify({
-            method: "getVideoCapability",
-            params: {},
-          }),
-        },
-      }),
+        channel: channelId,
+        text: message,
+        username: "Psulit Cash Count",
+        icon_emoji: ":bank:"
+      })
     });
-
-    // Use the TP-Link stream snapshot endpoint
-    const snapshotUrl = `https://storage.tplinkcloud.com/v1/devices/${device.deviceId}/snapshot?token=${token}`;
-    const snapRes = await fetch(snapshotUrl);
-    if (snapRes.ok) {
-      const buffer = await snapRes.buffer();
-      return buffer;
-    }
-
-    // Alternative: try direct stream API
-    const streamRes = await fetch(regionUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        method: "passthrough",
-        params: {
-          deviceId: device.deviceId,
-          requestData: JSON.stringify({
-            method: "getMediaEncrypt",
-            params: {},
-          }),
-        },
-      }),
-    });
-
-    return null;
-  } catch (e) {
-    console.log("Snapshot error:", e.message);
-    return null;
+    const data = await res.json();
+    console.log("Slack result:", JSON.stringify(data).slice(0, 200));
+    return data.ok;
+  } catch(e) {
+    console.log("Slack error:", e.message);
+    return false;
   }
 }
 
-// List devices
+async function getSnapshot(device, token) {
+  const regionUrl = device.appServerUrl;
+  console.log("Trying snapshot for device:", device.alias, "region:", regionUrl);
+
+  // Method 1: Direct snapshot endpoint
+  const snapUrl = `${regionUrl}/snapshot?deviceId=${device.deviceId}&token=${token}`;
+  try {
+    const r = await fetch(snapUrl);
+    if (r.ok && r.headers.get("content-type")?.includes("image")) {
+      console.log("Method 1 success");
+      return await r.buffer();
+    }
+    console.log("Method 1 status:", r.status, r.headers.get("content-type"));
+  } catch(e) { console.log("Method 1 error:", e.message); }
+
+  // Method 2: Passthrough getPreviewImageInfo
+  try {
+    const r = await fetch(`${regionUrl}?token=${token}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        method: "passthrough",
+        params: {
+          deviceId: device.deviceId,
+          requestData: JSON.stringify({
+            method: "getPreviewImageInfo",
+            params: {},
+          }),
+        },
+      }),
+    });
+    const data = await r.json();
+    console.log("Method 2 result:", JSON.stringify(data).slice(0, 300));
+    const inner = JSON.parse(data?.result?.responseData || "{}");
+    const imgUrl = inner?.result?.previewImage || inner?.result?.url;
+    if (imgUrl) {
+      const imgRes = await fetch(imgUrl);
+      if (imgRes.ok) return await imgRes.buffer();
+    }
+  } catch(e) { console.log("Method 2 error:", e.message); }
+
+  // Method 3: getMediaEncrypt for stream info
+  try {
+    const r = await fetch(`${regionUrl}?token=${token}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        method: "passthrough",
+        params: {
+          deviceId: device.deviceId,
+          requestData: JSON.stringify({
+            method: "getLiveView",
+            params: { channels: [0] },
+          }),
+        },
+      }),
+    });
+    const data = await r.json();
+    console.log("Method 3 result:", JSON.stringify(data).slice(0, 300));
+  } catch(e) { console.log("Method 3 error:", e.message); }
+
+  return null;
+}
+
 app.get("/tapo-devices", async (req, res) => {
   try {
     if (!TAPO_EMAIL || !TAPO_PASSWORD) return res.json({ ok: false, error: "Tapo credentials not configured" });
     const token = await getTapoToken();
-    if (!token) return res.json({ ok: false, error: "Tapo login failed — check credentials" });
+    if (!token) return res.json({ ok: false, error: "Tapo login failed" });
     const devices = await getTapoDevices(token);
     res.json({ ok: true, devices: devices.map(d => ({ name: d.alias, id: d.deviceId, model: d.deviceModel, region: d.appServerUrl })) });
   } catch (e) {
@@ -116,7 +161,6 @@ app.get("/tapo-devices", async (req, res) => {
   }
 });
 
-// Send text report to Telegram
 app.post("/send-report", async (req, res) => {
   try {
     const { message } = req.body;
@@ -132,21 +176,14 @@ app.post("/send-report", async (req, res) => {
   }
 });
 
-// Send photo to Telegram (manual upload fallback)
 app.post("/send-photo", upload.single("photo"), async (req, res) => {
   try {
     const { caption } = req.body;
     const form = new FormData();
     form.append("chat_id", CHAT_ID);
     form.append("caption", caption || "Cash Count Photo");
-    form.append("photo", req.file.buffer, {
-      filename: req.file.originalname || "cashcount.jpg",
-      contentType: req.file.mimetype,
-    });
-    const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
-      method: "POST",
-      body: form,
-    });
+    form.append("photo", req.file.buffer, { filename: "cashcount.jpg", contentType: req.file.mimetype });
+    const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, { method: "POST", body: form });
     const data = await r.json();
     res.json({ ok: data.ok });
   } catch (e) {
@@ -154,7 +191,16 @@ app.post("/send-photo", upload.single("photo"), async (req, res) => {
   }
 });
 
-// Auto-snapshot from Tapo and send to Telegram
+app.post("/send-slack", async (req, res) => {
+  try {
+    const { branch, message } = req.body;
+    const ok = await sendToSlack(branch, message);
+    res.json({ ok });
+  } catch(e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
 app.post("/tapo-snapshot", async (req, res) => {
   try {
     const { branch, caption } = req.body;
@@ -167,33 +213,33 @@ app.post("/tapo-snapshot", async (req, res) => {
     const cameraName = BRANCH_CAMERAS[branch];
     const device = devices.find(d => d.alias === cameraName);
 
-    if (!device) return res.json({ ok: false, error: `Camera "${cameraName}" not found` });
+    if (!device) return res.json({ ok: false, error: `Camera "${cameraName}" not found. Available: ${devices.map(d=>d.alias).join(", ")}` });
 
-    // Try to get snapshot buffer
-    const snapBuffer = await getTapoSnapshot(device, token);
+    console.log("Getting snapshot for:", cameraName);
+    const snapBuffer = await getSnapshot(device, token);
 
-    if (snapBuffer && snapBuffer.length > 1000) {
-      // Send snapshot to Telegram
+    if (snapBuffer && snapBuffer.length > 500) {
       const form = new FormData();
       form.append("chat_id", CHAT_ID);
       form.append("caption", caption || `📸 CCTV Snapshot — ${branch} — ${cameraName}`);
       form.append("photo", snapBuffer, { filename: "snapshot.jpg", contentType: "image/jpeg" });
       const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, { method: "POST", body: form });
       const data = await r.json();
+      console.log("Telegram photo result:", JSON.stringify(data).slice(0, 200));
       return res.json({ ok: data.ok, method: "snapshot", camera: cameraName });
     }
 
-    // Fallback: send camera info as text if snapshot fails
-    const fallbackMsg = `📹 CCTV Auto-capture attempted\n📷 Camera: ${cameraName}\n🏦 Branch: ${branch}\n⚠️ Live snapshot unavailable — please verify manually on Tapo app`;
+    // Fallback message
     const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: CHAT_ID, text: caption + "\n\n" + fallbackMsg }),
+      body: JSON.stringify({ chat_id: CHAT_ID, text: `📹 CCTV: ${cameraName} (${branch})\n⚠️ Auto-snapshot unavailable — verify on Tapo app\n${caption}` }),
     });
     const data = await r.json();
     res.json({ ok: data.ok, method: "fallback", camera: cameraName });
 
   } catch (e) {
+    console.log("Snapshot error:", e.message);
     res.json({ ok: false, error: e.message });
   }
 });
