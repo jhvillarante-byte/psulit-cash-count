@@ -19,6 +19,50 @@ const SLACK_CHANNELS = {
   Intrepid: "C06NARV9T1R",
 };
 
+// Teller credentials
+const TELLERS = [
+  { username: "irene",   password: "pSulit101.", branch: "Solaire",   displayName: "Irene Maligat" },
+  { username: "gheka",   password: "pSulit201.", branch: "Solaire",   displayName: "Gheka" },
+  { username: "tina",    password: "pSulit113.", branch: "Solaire",   displayName: "Tina" },
+  { username: "jazelle", password: "pSulit134.", branch: "Solaire",   displayName: "Jazelle" },
+  { username: "joan",    password: "pSulit311.", branch: "Alphaland", displayName: "Joan Legaspi" },
+];
+
+// Sessions: { token -> { username, branch, displayName, expires } }
+const sessions = {};
+
+function generateToken() {
+  return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+}
+
+app.post("/login", (req, res) => {
+  const { username, password } = req.body;
+  const teller = TELLERS.find(t => t.username === username.toLowerCase().trim() && t.password === password);
+  if (!teller) return res.json({ ok: false, error: "Invalid username or password." });
+  const token = generateToken();
+  sessions[token] = { username: teller.username, branch: teller.branch, displayName: teller.displayName, expires: Date.now() + 12 * 60 * 60 * 1000 };
+  res.json({ ok: true, token, branch: teller.branch, displayName: teller.displayName });
+});
+
+app.post("/verify-token", (req, res) => {
+  const { token } = req.body;
+  const session = sessions[token];
+  if (!session || session.expires < Date.now()) return res.json({ ok: false });
+  res.json({ ok: true, branch: session.branch, displayName: session.displayName });
+});
+
+app.post("/change-password", (req, res) => {
+  const { token, currentPassword, newPassword } = req.body;
+  const session = sessions[token];
+  if (!session || session.expires < Date.now()) return res.json({ ok: false, error: "Session expired. Please log in again." });
+  const teller = TELLERS.find(t => t.username === session.username);
+  if (!teller) return res.json({ ok: false, error: "User not found." });
+  if (teller.password !== currentPassword) return res.json({ ok: false, error: "Current password is incorrect." });
+  if (newPassword.length < 6) return res.json({ ok: false, error: "New password must be at least 6 characters." });
+  teller.password = newPassword;
+  res.json({ ok: true });
+});
+
 const BRANCH_CAMERAS = {
   Solaire: "SolaireCam01",
   Alphaland: "Alphaland_psulit_vault",
