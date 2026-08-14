@@ -71,9 +71,29 @@ app.post("/send-report", async (req, res) => {
 
 app.post("/send-slack", async (req, res) => {
   try {
-    const { branch, message } = req.body;
-    const ok = await sendToSlack(branch, message);
-    res.json({ ok });
+    const { branch, message, breakdown } = req.body;
+    const channelId = SLACK_CHANNELS[branch];
+    if (!channelId || !SLACK_TOKEN) return res.json({ ok: false, error: "No channel or token" });
+
+    // Send summary message
+    const r1 = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${SLACK_TOKEN}` },
+      body: JSON.stringify({ channel: channelId, text: message })
+    });
+    const d1 = await r1.json();
+    if (!d1.ok) return res.json({ ok: false, error: d1.error });
+
+    // Send breakdown as thread reply
+    if (breakdown && d1.ts) {
+      await fetch("https://slack.com/api/chat.postMessage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${SLACK_TOKEN}` },
+        body: JSON.stringify({ channel: channelId, text: breakdown, thread_ts: d1.ts })
+      });
+    }
+
+    res.json({ ok: true });
   } catch(e) {
     res.json({ ok: false, error: e.message });
   }
