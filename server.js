@@ -86,13 +86,23 @@ app.post("/send-slack", async (req, res) => {
     const d1 = await r1.json();
     if (!d1.ok) return res.json({ ok: false, error: d1.error });
 
-    // Send full breakdown as DM to manager only
+    // Send full summary + breakdown as DM to manager
     if (breakdown) {
-      await fetch("https://slack.com/api/chat.postMessage", {
+      // Send summary to DM first
+      const dmR = await fetch("https://slack.com/api/chat.postMessage", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${SLACK_TOKEN}` },
-        body: JSON.stringify({ channel: MANAGER_USER_ID, text: breakdown })
+        body: JSON.stringify({ channel: MANAGER_USER_ID, text: message })
       });
+      const dmD = await dmR.json();
+      // Send breakdown as thread reply to DM
+      if (dmD.ok && dmD.ts) {
+        await fetch("https://slack.com/api/chat.postMessage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${SLACK_TOKEN}` },
+          body: JSON.stringify({ channel: MANAGER_USER_ID, text: breakdown, thread_ts: dmD.ts })
+        });
+      }
     }
 
     res.json({ ok: true });
