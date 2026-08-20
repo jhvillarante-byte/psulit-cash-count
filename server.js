@@ -69,13 +69,15 @@ app.post("/send-report", async (req, res) => {
   }
 });
 
+const MANAGER_USER_ID = "U0B8SV8CG9L"; // Corporate Psulit DM
+
 app.post("/send-slack", async (req, res) => {
   try {
     const { branch, message, breakdown } = req.body;
     const channelId = SLACK_CHANNELS[branch];
     if (!channelId || !SLACK_TOKEN) return res.json({ ok: false, error: "No channel or token" });
 
-    // Send summary message
+    // Send summary to channel
     const r1 = await fetch("https://slack.com/api/chat.postMessage", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${SLACK_TOKEN}` },
@@ -84,12 +86,12 @@ app.post("/send-slack", async (req, res) => {
     const d1 = await r1.json();
     if (!d1.ok) return res.json({ ok: false, error: d1.error });
 
-    // Send breakdown as thread reply
-    if (breakdown && d1.ts) {
+    // Send full breakdown as DM to manager only
+    if (breakdown) {
       await fetch("https://slack.com/api/chat.postMessage", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${SLACK_TOKEN}` },
-        body: JSON.stringify({ channel: channelId, text: breakdown, thread_ts: d1.ts })
+        body: JSON.stringify({ channel: MANAGER_USER_ID, text: breakdown })
       });
     }
 
