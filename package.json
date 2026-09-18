@@ -4,7 +4,8 @@
   "description": "Psulit Cash Count Backend - Telegram Bridge",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test test-security.js test-security-http.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -15,5 +16,8 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "supertest": "^7.1.4"
   }
 }
