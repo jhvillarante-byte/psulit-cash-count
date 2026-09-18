@@ -24,7 +24,7 @@ const BRANCH_CAMERAS = {
   Alphaland: "Alphaland_psulit_vault",
 };
 
-const allowedOrigin = process.env.CASH_COUNT_FRONTEND_ORIGIN || "https://psulit-cash-count.netlify.app";
+const allowedOrigin = (process.env.CASH_COUNT_FRONTEND_ORIGIN || "https://psulit-cashcount.netlify.app").replace(/\/+$/, "");
 app.set("trust proxy", 1);
 app.use(cors({ origin: allowedOrigin }));
 app.use(express.json());
