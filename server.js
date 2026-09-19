@@ -7,8 +7,9 @@ const cors = require("cors");
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
-const BOT_TOKEN = "8840495574:AAGMVmeIaEkokunOERmSM6Niv9EKqL2zwJg";
-const CHAT_ID = "-4680237259";
+// Telegram config comes from env vars so the bot token is not in the repo.
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
+const CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
 const TAPO_EMAIL = process.env.TAPO_EMAIL;
 const TAPO_PASSWORD = process.env.TAPO_PASSWORD;
 const SLACK_TOKEN = process.env.SLACK_TOKEN;
@@ -115,6 +116,7 @@ async function sendToSlack(branch, message) {
 }
 
 app.post("/send-report", async (req, res) => {
+  if (!BOT_TOKEN || !CHAT_ID) return res.json({ ok: false, error: "Telegram is not configured on the server." });
   if (!requireSession(req)) return res.status(401).json({ ok: false, error: "Session expired. Please log in again." });
   try {
     const { message } = req.body;
